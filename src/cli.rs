@@ -13,6 +13,30 @@ fn parse_ensured_directory(path: &str) -> Result<String, std::io::Error> {
     Ok(std::fs::canonicalize(path)?.to_string_lossy().to_string())
 }
 
+fn parse_mem_size(mem_str: &str) -> Result<usize, std::io::Error> {
+    let mem_str = mem_str.trim();
+    let (num_part, unit) = if let Some(pos) = mem_str.find(|c: char| c.is_alphabetic()) {
+        let (num, unit) = mem_str.split_at(pos);
+        (num.trim(), unit.trim())
+    } else {
+        (mem_str, "")
+    };
+
+    let value: usize = num_part
+        .parse()
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid number in memory size"))?;
+
+    match unit {
+        "KiB" => Ok(value * 1024),
+        "MiB" => Ok(value * 1024 * 1024),
+        "GiB" => Ok(value * 1024 * 1024 * 1024),
+        "" => Ok(value),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Unsupported unit: {}", unit),
+        )),
+    }
+}
 macro_rules! possible_values {
     ($t: ty, $options: ident) => {{
         use clap::builder::{PossibleValuesParser, TypedValueParser};
@@ -287,6 +311,10 @@ pub struct CommonOpts {
     /// Command to run as a service
     #[clap(required(true), last(true))]
     pub command: Vec<String>,
+
+    /// Memory limit
+    #[clap(long, value_parser = parse_mem_size)]
+    pub memory_limit: Option<usize>,
 }
 
 #[derive(clap::Subcommand, Clone, Debug, PartialEq, Eq)]

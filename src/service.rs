@@ -142,21 +142,14 @@ pub fn run_service(start_arguments: Vec<std::ffi::OsString>) -> windows_service:
 
     let mut restart_after: Option<std::time::Instant> = None;
 
-    // Create a process job that kills all child processes when closed (if kill_process_tree is enabled)
-    let mut process_job: Option<ProcessJob> = if opts.kill_process_tree {
-        match ProcessJob::create_kill_on_close() {
-            Ok(pj) => {
-                info!("Created process job for process group management");
-                Some(pj)
-            }
-            Err(e) => {
+    // Create a process job that will handle killing the child process tree and enforcing memory limits, if those options are enabled.
+    let mut process_job: Option<ProcessJob> =
+        ProcessJob::create_job_object(opts.memory_limit.unwrap_or(0), opts.kill_process_tree)
+            .or_else(|e| {
                 error!("Failed to create process job: {:?}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
+                Ok::<Option<ProcessJob>, windows::core::Error>(None)
+            })
+            .unwrap();
 
     debug!("Entering main service loop");
     'outer: loop {
@@ -240,7 +233,7 @@ pub fn run_service(start_arguments: Vec<std::ffi::OsString>) -> windows_service:
             }
         };
 
-        // Assign process to job (if kill_process_tree is enabled)
+        // Assign process to job
         if let Some(ref pj) = process_job {
             if let Err(e) = pj.assign(&child) {
                 error!("Failed to assign process to job: {:?}", e);
@@ -467,14 +460,14 @@ speculate::speculate! {
 
     describe "process_job" {
         it "can create a process job" {
-            assert!(ProcessJob::create_kill_on_close().is_ok());
+            assert!(ProcessJob::create_job_object(0, true).is_ok());
         }
 
         it "kills the assigned process when the job is dropped" {
             use std::{thread, time::Duration};
 
             // Create job
-            let job = ProcessJob::create_kill_on_close().unwrap();
+            let job = ProcessJob::create_job_object(0, true).unwrap().unwrap();
 
             // Spawn long-running dummy command
             let mut child = std::process::Command::new("cmd")
@@ -505,7 +498,7 @@ speculate::speculate! {
             use std::{thread, time::Duration};
             use sysinfo::{System, Pid};
 
-            let job = ProcessJob::create_kill_on_close().unwrap();
+            let job = ProcessJob::create_job_object(0, true).unwrap().unwrap();
 
             // Parent process spawns a grandchild
             let child = std::process::Command::new("powershell")

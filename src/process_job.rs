@@ -13,21 +13,34 @@ pub struct ProcessJob {
 }
 
 impl ProcessJob {
-    /// Create a process job that kills all child processes when closed
-    pub fn create_kill_on_close() -> Result<Self, windows::core::Error> {
-        unsafe {
-            let job = CreateJobObjectW(None, None)?;
-            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    /// Create a process job that handles
+    /// - Limiting process memory (JOB_OBJECT_LIMIT_PROCESS_MEMORY)
+    /// - Process termination when job closes (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+    pub fn create_job_object(memory_limit: usize, kill_on_close: bool) -> Result<Option<Self>, windows::core::Error> {
+        if memory_limit != 0 || kill_on_close {
+            unsafe {
+                let job = CreateJobObjectW(None, None)?;
+                let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                if kill_on_close {
+                    limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                }
+                if memory_limit > 0 {
+                    limits.ProcessMemoryLimit = memory_limit;
+                    limits.BasicLimitInformation.LimitFlags |=
+                        windows::Win32::System::JobObjects::JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+                }
 
-            SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &limits as *const _ as *const _,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )?;
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &limits as *const _ as *const _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )?;
 
-            Ok(Self { handle: job })
+                Ok(Some(Self { handle: job }))
+            }
+        } else {
+            Ok(None)
         }
     }
 
